@@ -1,0 +1,74 @@
+# Date: 2017-06-30T02:44:28+0000
+# Tranalyzer 0.7.1-lm1 (Anteater), beta Boeing.
+# sensorID: 666
+# PID: 605
+# Command line: tranalyzer -r /media/SURF2017/CTU-13-Dataset/10/capture20110818.truncated.pcap
+# HW Info: V;Linux;4.8.0-56-generic;#61~16.04.1-Ubuntu SMP Wed Jun 14 11:58:22 UTC 2017;x86_64
+#
+# Plugins loaded:
+# 00: protoStats, version 0.7.0
+# 01: basicFlow, version 0.7.0
+# 02: basicStats, version 0.7.0
+# 03: pktSIATHisto, version 0.7.0
+# 04: descriptiveStats, version 0.7.0
+# 05: binSink, version 0.7.0
+# 06: txtSink, version 0.7.0
+#
+# Col No.	Type	Name	Description
+1	C:N	dir	Flow direction
+2	U64:N	flowInd	Flow index
+3	H64:N	flowStat	Flow status & warn register
+4	U64.U32:N	unixTimeFirst	System time of first packet
+5	U64.U32:N	unixTimeLast	System time of last packet
+6	U64.U32:N	duration	Flow duration
+7	U8:N	numHdrDesc	Number of different headers descriptions
+8	U8:R	numHdrs	Number of headers (depth) in hdrDesc
+9	SC:R	hdrDesc	Headers description
+10	U16:R	ethVlanID	VLAN IDs
+11	IP4|H32:N	srcIP4	Source IPv4 address
+12	SC:N	srcIPCC	Source IP country code
+13	U16:N	srcPort	Source port
+14	IP4|H32:N	dstIP4	Destination IPv4 address
+15	SC:N	dstIPCC	Destination IP country code
+16	U16:N	dstPort	Destination port
+17	U8:N	l4Proto	Layer 4 protocol
+18	U64:N	numPktsSnt	Number of transmitted packets
+19	U64:N	numPktsRcvd	Number of received packets
+20	U64:N	numBytesSnt	Number of transmitted bytes
+21	U64:N	numBytesRcvd	Number of received bytes
+22	U16:N	minPktSz	Minimum layer3 packet size
+23	U16:N	maxPktSz	Maximum layer3 packet size
+24	F:N	avePktSize	Average packet load ratio
+25	F:N	stdPktSize	Filt stddev packet load ratio
+26	F:N	pktps	Send packets per second
+27	F:N	bytps	Send bytes per second
+28	F:N	pktAsm	Packet stream asymmetry
+29	F:N	bytAsm	Byte stream asymmetry
+30	U32:N	tCnt	PktIAT Number of tree entries
+31	U16_U32_U32_U32_U32:R	Ps_Iat_Cnt_PsCnt_IatCnt	Packetsize min Inter Arrival Time of bin histogram
+32	F:N	MinPl	Minimum packet length
+33	F:N	MaxPl	Maximum packet length
+34	F:N	MeanPl	Mean packet length
+35	F:N	LowQuartilePl	Lower quartile of packet lengths
+36	F:N	MedianPl	Median of packet lengths
+37	F:N	UppQuartilePl	Upper quartile of packet lengths
+38	F:N	IqdPl	Inter quartile distance of packet lengths
+39	F:N	ModePl	Mode of packet lengths
+40	F:N	RangePl	Range of packet lengths
+41	F:N	StdPl	Standard deviation of packet lengths
+42	F:N	RobStdPl	Robust standard deviation of packet lengths
+43	F:N	SkewPl	Skewness of packet lengths
+44	F:N	ExcPl	Excess of packet lengths
+45	F:N	MinIat	Minimum inter arrival time
+46	F:N	MaxIat	Maximum inter arrival time
+47	F:N	MeanIat	Mean inter arrival time
+48	F:N	LowQuartileIat	Lower quartile of inter arrival times
+49	F:N	MedianIat	Median inter arrival times
+50	F:N	UppQuartileIat	Upper quartile of inter arrival times
+51	F:N	IqdIat	Inter quartile distance of inter arrival times
+52	F:N	ModeIat	Mode of inter arrival times
+53	F:N	RangeIat	Range of inter arrival times
+54	F:N	StdIat	Standard deviation of inter arrival times
+55	F:N	RobStdIat	Robust standard deviation of inter arrival times
+56	F:N	SkewIat	Skewness of inter arrival times
+57	F:N	ExcIat	Excess of inter arrival times
