@@ -8,13 +8,16 @@
 from __future__ import division
 import sys
 import FlowParser as fp
-from PyQt4 import QtGui, QtCore
-import numpy as np
-import pyqtgraph as pg
+import re
 import os
 import glob
+import errno
+import subprocess
 import threading
 import time
+from datetime import date, datetime, timedelta
+import pyqtgraph as pg
+from PyQt4 import QtGui, QtCore
 from sklearn.externals import joblib
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import StandardScaler
@@ -27,6 +30,16 @@ OFFLINE_PCAP = 1
 ONLINE = 2
 
 ALPHA = 0.2
+
+'''
+Prevent garbage collecting so things don't go out of scope
+'''
+class WindowContainer(object):
+    def __init__(self):
+        self.window_list = []
+
+    def add_new_window(self, window):
+        self.window_list.append(window)
 
 class Model:
     model = ''
@@ -92,14 +105,35 @@ Launcher window that asks user if they want to perform real-time .pcap capture o
 
 
 class Launcher(QtGui.QWidget):
-    def __init__(self):
+    def __init__(self, window_container):
         super(Launcher, self).__init__()
+        self.wc = window_container
         self.initUI()
 
     def initUI(self):
         self.setGeometry(300, 300, 250, 150)
         self.setWindowTitle('Launcher')
         self.setWindowIcon(QtGui.QIcon('../etc/favicon.png'))
+
+        # Online mode not implemented!
+        self.online_btn = QtGui.QPushButton('Online mode', self)
+        self.online_btn.setEnabled(False)
+
+        self.offline_btn = QtGui.QPushButton('Offline mode', self)
+        self.offline_btn.resize(self.offline_btn.sizeHint())
+        self.offline_btn.clicked.connect(self.offline_btn_handler)
+
+        self.label = QtGui.QLabel("botd v1.0 (beta)")
+        newfont = QtGui.QFont("Courier", 16, QtGui.QFont.Bold)
+        newfont.setStyleHint(QtGui.QFont.TypeWriter)
+        self.label.setFont(newfont)
+
+        self.vbox = QtGui.QVBoxLayout()
+        self.vbox.addWidget(self.label)
+        self.vbox.addWidget(self.online_btn)
+        self.vbox.addWidget(self.offline_btn)
+
+        self.setLayout(self.vbox)
 
         self.center()
         self.show()
@@ -110,12 +144,156 @@ class Launcher(QtGui.QWidget):
         qr.moveCenter(cp)
         self.move(qr.topLeft())
 
+    def offline_btn_handler(self):
+        # TODO: change to adjustable
+        window_length = 300
+        overlap_length = 150
+        internal_hosts_prefix = "147.32"
+
+        self.dialog = QtGui.QFileDialog(self)
+        self.dialog.setAcceptMode(QtGui.QFileDialog.AcceptOpen)
+        self.dialog.setFileMode(QtGui.QFileDialog.ExistingFile)
+
+        filepath = str(self.dialog.getOpenFileName(self, "Open .pcap", "../datasets/",
+                                                   "Packet captures (*.pcap *.pcapng);;All files (*.*)"))
+
+        if filepath != '':
+            if (filepath.endswith('.pcap') or filepath.endswith('.pcapng')):
+                dirname, basename = os.path.split(filepath)
+                filename, ext = os.path.splitext(basename)
+                output_folder = os.path.join(dirname, '_'.join(
+                    [re.sub('[^0-9a-zA-Z]+', '', filename), str(window_length), str(overlap_length)]))
+                print(output_folder)
+
+                try:
+                    main_app = MainApplication(filepath, output_folder, window_length, overlap_length, internal_hosts_prefix)
+                    self.wc.add_new_window(main_app)
+                    # main_app = (output_folder)
+                except Exception as e:
+                    print(e.message)
+                self.close()
+            else:
+                msgbox = QtGui.QMessageBox()
+                msgbox.setText("Error")
+                msgbox.setInformativeText("Invalid .pcap file: " + filepath)
+                msgbox.addButton(QtGui.QMessageBox.Ok)
+                msgbox.exec_()
+
+
+'''
+Thread for making .argus and then Netflow files in intervals
+'''
+class NetflowThread(pg.QtCore.QThread):
+    owd = ''
+    pcap_file = ''
+
+    statusinfo_signal = pg.QtCore.Signal(str)
+
+    def __init__(self, pcap_file, window_size, overlap):
+        super(NetflowThread, self).__init__()
+        self.owd = os.getcwd()
+
+        self.filepath = pcap_file
+        self.window_size = window_size
+        self.overlap = overlap
+
+    def run(self):
+        # Get basepath of pcap file and create new output folder for the split pcaps
+        dirname, basename = os.path.split(self.filepath)
+        filename, ext = os.path.splitext(basename)
+        # output_folder = os.path.join(dirname,
+        #                             '_'.join([re.sub('[^0-9a-zA-Z]+', '', filename), str(self.window_size), str(self.overlap)]))
+
+        output_folder = os.path.join('_'.join([re.sub('[^0-9a-zA-Z]+', '', filename), str(self.window_size), str(self.overlap)]))
+
+        if os.path.isdir(os.path.join(dirname, output_folder)):
+            self.statusinfo_signal.emit(output_folder + " already exists. Skipping Netflow generation...")
+            self.statusinfo_signal.emit("[PERM]Using existing folder")
+            self.exit()
+
+        os.chdir(dirname)
+
+        # Get time of first and last packet using editcaps
+        print("\nPreparing to generate NetFlows, running capinfos...")
+        output = subprocess.check_output(['capinfos', '-u', '-a', '-e', self.filepath])
+        r_first = re.compile("First packet time:\s*(.*)$", re.MULTILINE)
+        r_last = re.compile("Last packet time:\s*(.*)$", re.MULTILINE)
+
+        # Parse times into datetime objects
+        dt_first = datetime.strptime(r_first.search(output).groups(1)[0], "%Y-%m-%d %H:%M:%S.%f")
+        dt_last = datetime.strptime(r_last.search(output).groups(1)[0], "%Y-%m-%d %H:%M:%S.%f") + timedelta(seconds=1)
+
+        try:
+            os.makedirs(output_folder)
+            os.chdir(output_folder)
+            self.statusinfo_signal.emit("Created folder: " + output_folder)
+
+            # Generator for datetime ranges
+            def daterange(start, end, delta):
+                curr = start
+                while curr < end:
+                    yield curr
+                    curr += delta
+
+            print("\nStarting to generate NetFlow files...")
+
+            # For each interval, filter the packets in that time
+            for i, d in enumerate(daterange(dt_first, dt_last, timedelta(seconds=self.overlap)), 1):
+                # make the pcap
+                start_time = d.strftime("%Y-%m-%d %H:%M:%S")
+                end_time = (d + timedelta(seconds=self.window_size)).strftime("%Y-%m-%d %H:%M:%S")
+                # print(start_time, end_time)
+                # new_filename = os.path.join(output_folder, str(i)) + ext
+                new_filename = str(i) + ext
+                args = ['editcap', '-A', start_time, '-B', end_time, '-F', 'pcap', self.filepath, new_filename]
+                cmd = subprocess.list2cmdline(args)
+                print("Running: " + cmd)
+                self.statusinfo_signal.emit("Running: " + cmd)
+                subprocess.call(args)
+
+                # Generate .argus
+                argusfile = str(i) + '.argus'
+                args = ['argus', '-r', new_filename, '-w', argusfile, '-ARJZ']
+                cmd = subprocess.list2cmdline(args)
+                print("Running: " + cmd)
+                self.statusinfo_signal.emit("Running: " + cmd)
+                subprocess.call(args)
+
+                # Generate binetflow
+                binetflow_file = str(i) + '.binetflow'
+                self.statusinfo_signal.emit("Generating: " + binetflow_file)
+                outfile = open(binetflow_file, 'w')
+                args = ['ra', '-n', '-u', '-r', argusfile, '-s', 'srcid', 'stime', 'ltime', 'flgs', 'seq', 'smac',
+                        'dmac',
+                        'soui', 'doui', 'saddr', 'daddr', 'proto', 'sport', 'dport', 'stos', 'dtos', 'sdsb', 'ddsb',
+                        'sco',
+                        'dco', 'sttl', 'dttl', 'sipid', 'dipid', 'smpls', 'dmpls', 'spkts', 'dpkts', 'sbytes', 'dbytes',
+                        'sappbytes', 'dappbytes', 'sload', 'dload', 'sloss', 'dloss', 'sgap', 'dgap', 'dir', 'sintpkt',
+                        'dintpkt', 'sintdist', 'dintdist', 'sintpktact', 'dintpktact', 'sintdistact', 'dintdistact',
+                        'sintpktidl', 'dintpktidl', 'sintdistidl', 'dintdistidl', 'sjit', 'djit', 'sjitact', 'djitact',
+                        'sjitidle', 'djitidle', 'state', 'suser', 'duser', 'swin', 'dwin', 'svlan', 'dvlan', 'svid',
+                        'dvid',
+                        'svpri', 'dvpri', 'srng', 'erng', 'stcpb', 'dtcpb', 'tcprtt', 'synack', 'ackdat', 'tcpopt',
+                        'inode',
+                        'offset', 'spktsz', 'dpktsz', 'smaxsz', 'dmaxsz', 'sminsz', 'dminsz', 'dur', 'rate', 'srate',
+                        'drate',
+                        'trans', 'runtime', 'mean', 'stddev', 'sum', 'min', 'max', 'pkts', 'bytes', 'appbytes', 'load',
+                        'loss',
+                        'ploss', 'sploss', 'dploss', 'abr', '-c', ',']
+                # cmd = subprocess.list2cmdline(args)
+                subprocess.call(args, stdout=outfile)
+                outfile.close()
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                self.statusinfo_signal.emit(output_folder + " already exists. Skipping Netflow generation...")
+                self.statusinfo_signal.emit("[PERM]Using existing folder")
+                self.exit()
+
+        os.chdir(self.owd)
 
 '''
 Thread for background processing of stuff
 '''
-
-
 class WorkerThread(pg.QtCore.QThread):
     owd = ''
     features_list = ''
@@ -129,6 +307,8 @@ class WorkerThread(pg.QtCore.QThread):
 
     data = {}
     hosts_ranking = {}
+
+    statusinfo_signal = pg.QtCore.Signal(str)
 
     models_loaded_signal = pg.QtCore.Signal(object)
     hosts_updated_signal = pg.QtCore.Signal(object)
@@ -160,18 +340,21 @@ class WorkerThread(pg.QtCore.QThread):
     def load_models(self, models_folder):
         model_names = []
 
-        print("Loading all models in: " + models_folder)
+        print("Loading all models in: " + os.getcwd() + "/" + models_folder)
+        self.statusinfo_signal.emit("Loading all models in: " + models_folder)
         model_id = 1
         os.chdir(models_folder)
         for model_fname in glob.glob("*.pkl"):
             model_names.append(str(model_id) + ": " + model_fname)
 
             print("+ " + model_fname)
+            self.statusinfo_signal.emit("+ " + model_fname)
             model = Model(model_fname, self.features_list, self.internal_hosts_prefix)
             self.models[model_id] = model
             self.data[model_id] = {}
             model_id += 1
         print("Loaded " + str(model_id - 1) + " models")
+        self.statusinfo_signal.emit("Loaded " + str(model_id - 1) + " models")
         os.chdir(self.owd)
 
         self.models_loaded_signal.emit(tuple(model_names))
@@ -198,9 +381,18 @@ class WorkerThread(pg.QtCore.QThread):
             assert (self.pcap_folder != '')  # make sure pcap folder is not uninitialised
 
             print("\nBeginning offline session on folder: " + self.pcap_folder)
+            self.statusinfo_signal.emit("Beginning offline session on folder: " + self.pcap_folder)
 
             self.window_id = 1
-            os.chdir(self.pcap_folder)
+
+            # wait for other thread
+            while True:
+                try:
+                    os.chdir(self.pcap_folder)
+                    break
+                except Exception as e:
+                    self.statusinfo_signal.emit("Netflow folder not found. Preparing to generate windowed Netflow files by running capinfos (this may take a long time)...")
+                    time.sleep(5)
 
             while True:
                 # Must protect self._stop with a mutex because the main thread
@@ -211,7 +403,8 @@ class WorkerThread(pg.QtCore.QThread):
                         break
 
                     current_fname = str(self.window_id) + ".binetflow"
-                    print(current_fname)
+                    # print(current_fname)
+                    self.statusinfo_signal.emit("Processing: " + current_fname)
 
                     # If is a valid file
                     if os.path.isfile(current_fname):
@@ -372,9 +565,9 @@ class WorkerThread(pg.QtCore.QThread):
                         self.window_id += 1
                     else:
                         # append 0 before it ends TODO
-                        break
-
-                        # time.sleep(0.05)
+                        # break
+                        self.statusinfo_signal.emit("[PERM]Waiting on: " + current_fname + "...")
+                        time.sleep(5)
 
             os.chdir(self.owd)
 
@@ -395,33 +588,54 @@ Main window displaying the graphs.
 
 
 class MainApplication(QtGui.QWidget):
+    pcap_file = ''
+    pcap_folder = ''
+    window_length = ''
+    overlap_length = ''
+    internal_hosts_prefix = ''
+
+    thread1 = ''
+    thread2 = ''
     data = ''
 
-    def __init__(self):
-        # Initialise multithreading, worker thread for background processing
-        thread = WorkerThread(MODELS_FOLDER, FEATURES_LIST, 300, 150, "147.32")
-        thread.set_mode(OFFLINE_FOLDER,
-                        pcap_folder="../datasets/CTU-13-Dataset/9/capture20110817pcaptruncated_300_150")
-
-        # When models are loaded signal main UI to update dropdown
-        thread.models_loaded_signal.connect(self.update_models_dropdown)
-
-        # Whenever new hosts are found signal main UI to update dropdown
-        thread.hosts_updated_signal.connect(self.update_table)
-
-        # Whenever new graph points are received signal main UI to update graph
-        thread.data_signal.connect(self.update)
-
-        # Begin the worker thread
-        thread.start()
-
+    def __init__(self, pcap_file, pcap_folder, window_length, overlap_length, internal_hosts_prefix):
         super(MainApplication, self).__init__()
         self.initUI()
+
+        self.pcap_file = pcap_file
+        self.pcap_folder = pcap_folder
+        self.window_length = window_length
+        self.overlap_length = overlap_length
+        self.internal_hosts_prefix = internal_hosts_prefix
+
+        # Initialise multithreading, worker thread for background processing
+        self.thread2 = WorkerThread(MODELS_FOLDER, FEATURES_LIST, window_length, overlap_length, internal_hosts_prefix)
+        self.thread2.statusinfo_signal.connect(self.update_statusbar)
+        self.thread2.set_mode(OFFLINE_FOLDER, pcap_folder=pcap_folder)
+
+        # When models are loaded signal main UI to update dropdown
+        self.thread2.models_loaded_signal.connect(self.update_models_dropdown)
+
+        # Whenever new hosts are found signal main UI to update dropdown
+        self.thread2.hosts_updated_signal.connect(self.update_table)
+
+        # Whenever new graph points are received signal main UI to update graph
+        self.thread2.data_signal.connect(self.update)
+
+        # Begin the worker thread
+        self.thread2.start()
 
     def initUI(self):
         self.setGeometry(10, 10, 1000, 900)
         self.setWindowTitle('Botnet detector')
         self.setWindowIcon(QtGui.QIcon('../etc/favicon.png'))
+
+        # Statusbar
+        self.statusbar = QtGui.QStatusBar()
+        self.statusbar.setSizeGripEnabled(False)
+        self.statusbar.showMessage("Initializing...")
+        self.permstatuslabel = QtGui.QLabel("Initializing...")
+        self.statusbar.addPermanentWidget(self.permstatuslabel)
 
         # Text labels
         l1 = QtGui.QLabel("Model")
@@ -471,6 +685,9 @@ class MainApplication(QtGui.QWidget):
         self.vbox2.addLayout(self.hbox, 3)
         self.vbox2.addWidget(self.table, 2)
 
+        self.vbox2.addStretch()
+        self.vbox2.addWidget(self.statusbar)
+
         self.setLayout(self.vbox2)
 
         self.center()
@@ -482,6 +699,9 @@ class MainApplication(QtGui.QWidget):
                                            QtGui.QMessageBox.No, QtGui.QMessageBox.No)
 
         if reply == QtGui.QMessageBox.Yes:
+            if self.thread1 != '':
+                self.thread1.quit()
+            self.thread2.quit()
             event.accept()
         else:
             event.ignore()
@@ -491,6 +711,12 @@ class MainApplication(QtGui.QWidget):
         cp = QtGui.QDesktopWidget().availableGeometry().center()
         qr.moveCenter(cp)
         self.move(qr.topLeft())
+
+    def update_statusbar(self, message):
+        if str(message).startswith("[PERM]"):
+            self.permstatuslabel.setText(message[6:])
+        else:
+            self.statusbar.showMessage(message)
 
     def update_table(self, hosts_ranking):
         row_count = self.table.rowCount()
@@ -526,6 +752,16 @@ class MainApplication(QtGui.QWidget):
             self.hosts_dropdown.addItem(host)
 
     def update_models_dropdown(self, models):
+        # Initialise background thread for making NetFlow files if the folder does not already exist
+        if not os.path.isdir(self.pcap_folder):
+            self.thread1 = NetflowThread(self.pcap_file, self.window_length, self.overlap_length)
+            self.thread1.statusinfo_signal.connect(self.update_statusbar)
+            self.thread1.start()
+        else:
+            self.statusbar.showMessage(self.pcap_folder + " already exists. Skipping Netflow generation...")
+            self.permstatuslabel.setText("Using existing folder")
+
+        # Add models to dropdown
         for model_name in models:
             self.models_dropdown.addItem(model_name)
 
@@ -573,9 +809,10 @@ Main function
 
 
 def main():
+    wc = WindowContainer()
     app = QtGui.QApplication(sys.argv)
-    # launcher = Launcher()
-    main_app = MainApplication()
+    launcher = Launcher(wc)
+    # main_app = MainApplication("/media/SURF2017/SURF2017/datasets/CTU-13-Dataset/9/capture20110817pcaptruncated_300_150")
     sys.exit(app.exec_())
 
 
