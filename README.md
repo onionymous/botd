@@ -1,6 +1,7 @@
 # botd
 
-![botd](https://i.imgur.com/PePvYrP.png)
+
+<img src="https://i.imgur.com/PePvYrP.png" width="500" />
 
 [demo](https://imgur.com/a/OMkbI)
 
