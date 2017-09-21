@@ -471,7 +471,7 @@ class WorkerThread(pg.QtCore.QThread):
                                     botnet_hosts[src]['unique_ports'].add(flow[3])
                                     botnet_hosts[src]['unique_dsts'].add(dst)
 
-                            if dst.startswith("147.32"):
+                            if dst.startswith(self.internal_hosts_prefix):
                                 if dst not in botnet_hosts:
                                     botnet_hosts[dst] = {}
                                     botnet_hosts[dst]['count'] = 1
