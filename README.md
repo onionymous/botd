@@ -26,13 +26,17 @@ Dependencies
 
 Installing
 ------
-Install the required dependencies, then clone this repository.
+Install the required dependencies, then clone this repository. Download the datasets below, or use your own .pcap file.
 
 Datasets
 ------
 The datasets we have worked with during development is the [CTU-13 Dataset](http://mcfp.weebly.com/the-ctu-13-dataset-a-labeled-dataset-with-botnet-normal-and-background-traffic.html).
 
 Running in offline mode on some of the larger .pcaps is _very_ slow, due to the way `editcaps` is used to filter the packets in each interval, followed by `argus` and then `ra`. Versions of CTU-13 scenarios already split into .pcaps of 300 second intervals (with 150 second overlap between each interval) will be available to download and can be used to demonstrate the detector tool much faster.
+
+The following datasets contain both the original truncated .pcap, and a folder of .pcaps split into 300 second windows. To use the dataset, select the original truncated .pcap in the botd window - it will skip generating the split .pcaps because the folder already exists.
+
+* [CTU-13 dataset 9](https://blacker.caltech.edu/~onion/files/9.zip), 300 second windows with 150 second overlap (zipped file, 6.12GB compressed)
 
 Models
 ------
