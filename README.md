@@ -5,6 +5,8 @@
 
 [demo](https://imgur.com/a/OMkbI)
 
+**[Link to paper](https://blacker.caltech.edu/~onion/files/botd_paper_draft.pdf)** (draft, CURJ 2018 publication pending) 
+
 A machine learning based **bot**net **d**etector that examines network flows generated over limited time intervals and reports LAN hosts most likely to be infected. Developed as part of a SURF research project at Caltech. More info: https://botnetsurf2017.wordpress.com/
 
 This is a WIP, more info to come later!
