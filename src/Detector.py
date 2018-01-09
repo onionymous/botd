@@ -17,6 +17,7 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 import pyqtgraph as pg
+import numpy as np
 from PyQt4 import QtGui, QtCore
 from sklearn.externals import joblib
 from sklearn.cluster import AgglomerativeClustering
@@ -506,16 +507,29 @@ class WorkerThread(pg.QtCore.QThread):
                         labels = ac.labels_
 
                         clusters = {}
+                        host_vectors = {}
 
-                        for host, label in zip(ips, labels):
+                        for host, x, label in zip(ips, scaled_xs, labels):
                             if label not in clusters:
                                 clusters[label] = {host}
+                                host_vectors[label] = [x]
                             else:
                                 clusters[label].add(host)
+                                host_vectors[label].append(x)
+
+                        # CONSIDER USING AN ONLINE VARIANCE ALGORITHM FOR THIS PART?
 
                         # define 0 as the majority/normal cluster and 1 as the anomalous cluster
-                        if len(clusters[1]) > len(clusters[0]):
+                        #if len(clusters[1]) > len(clusters[0]):
+                        # the anomalous cluster has higher variance
+                        var_benign = np.var(host_vectors[0])
+                        var_bots = np.var(host_vectors[1])
+                        if var_benign > var_bots:
                             clusters = {0:clusters[1], 1:clusters[0]}
+                            var_benign, var_bots = var_bots, var_benign
+
+                            # this line no longer necessary because host vectors aren't used after this
+                            # host_vectors = {0:host_vectors[1], 1:host_vectors[0]}
 
                         # Update the ranking with the new info
                         ALPHA = 0.3
@@ -526,7 +540,7 @@ class WorkerThread(pg.QtCore.QThread):
 
                             curr = self.hosts_ranking[host]
                             r_prev = curr['score']
-                            r_now = 0.0
+                            r_now = var_benign / var_bots # 0.0
                             curr['score'] = ALPHA * r_now + (1 - ALPHA) * r_prev
 
                             if curr['score'] >= 0.85 or (curr['score'] >= 0.60 and curr['score'] > r_prev):

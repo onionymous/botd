@@ -28,6 +28,8 @@ import hdbscan
 from sklearn.preprocessing import StandardScaler
 import seaborn as sns
 import matplotlib.pyplot as plt
+from matplotlib import pyplot
+from mpl_toolkits.mplot3d import Axes3D
 
 '''
 Splits a .pcap file into time windows of <window_size> seconds with <overlap> seconds overlapping between windows
@@ -319,7 +321,9 @@ def visualize_clustering_tsne(filename, model_filename, savepath, dataset_no, in
 
     # Tsne
     print("Doing TSNE...")
-    tsne = TSNE(n_components=2, verbose=1, perplexity=30, n_iter=1000, learning_rate=10)
+    # tsne = TSNE(n_components=2, verbose=1, perplexity=30, n_iter=1000, learning_rate=10) # DS 9
+    #tsne = TSNE(n_components=2, verbose=1, perplexity=5, n_iter=1000, learning_rate=3) # DS6
+    tsne = TSNE(n_components=2, verbose=1, perplexity=5, n_iter=1000, learning_rate=10) # DS 10
     tsne_results = tsne.fit_transform(scaled_xs)
 
     print("Doing clustering...")
@@ -336,7 +340,7 @@ def visualize_clustering_tsne(filename, model_filename, savepath, dataset_no, in
     #    print(i, j)
     # clusterer = hdbscan.HDBSCAN(min_cluster_size=1, allow_single_cluster=True).fit(scaled_xs)
 
-    ac = AgglomerativeClustering(affinity="euclidean", linkage="average")
+    ac = AgglomerativeClustering(affinity="euclidean", linkage="ward")
     #ac = KMeans(n_clusters=2)
     ac.fit(scaled_xs)
     labels = ac.labels_
@@ -391,8 +395,8 @@ def visualize_clustering_tsne(filename, model_filename, savepath, dataset_no, in
     fig, ax = plt.subplots()
     ax.xaxis.set_ticklabels([])
     ax.yaxis.set_ticklabels([])
-    # ax.set_autoscalex_on(False)
-    # ax.set_autoscaley_on(False)
+    ax.set_autoscalex_on(True)
+    ax.set_autoscaley_on(True)
     # ax.set_xlim([-3, 3])
     # ax.set_ylim([-3, 3])
 
@@ -407,6 +411,189 @@ def visualize_clustering_tsne(filename, model_filename, savepath, dataset_no, in
     fig.savefig(savepath, bbox_inches='tight')
     #plt.show()
     plt.close(fig)
+
+'''
+Clustering logic copied over from detector, without GUI
+'''
+def visualize_clustering_tsne(filename, model_filename, savepath, dataset_no, infection_range):
+    internal_hosts_prefix = "147.32"
+    infected_IPs = eval("constants.DATASET_" + str(dataset_no) + "_INFECTED_HOSTS")
+    window = int(filename.split("/")[-1].strip(".binetflow"))
+
+    print("Loading model: " + model_filename)
+    model = Model(model_filename, fp.ARGUS_FIELDS, internal_hosts_prefix)
+    print("Parsing file: " + filename)
+    flows, xs = fp.parse_binetflow(filename)
+
+    print("Parsed " + str(len(flows)) + " flows, predicting...")
+    model.predict(flows, xs)
+
+    botnet_flows = model.get_botnet_flows()
+
+    # Do clustering on suspected botnet flows
+    botnet_hosts = {}
+
+    for flow, x in botnet_flows:
+        x = list(x)
+        src, dst = fp.get_src_dst(flow)
+
+        if src.startswith(internal_hosts_prefix):
+            if src not in botnet_hosts:
+                botnet_hosts[src] = {}
+                botnet_hosts[src]['count'] = 1
+                botnet_hosts[src]['srcpkts'] = x[2]
+                botnet_hosts[src]['dstpkts'] = x[3]
+                botnet_hosts[src]['srcbytes'] = x[4]
+                botnet_hosts[src]['dstbytes'] = x[5]
+                botnet_hosts[src]['unique_ports'] = {flow[3]}
+                botnet_hosts[src]['unique_dsts'] = {dst}
+            else:
+                botnet_hosts[src]['count'] += 1
+                botnet_hosts[src]['srcpkts'] += x[2]
+                botnet_hosts[src]['dstpkts'] += x[3]
+                botnet_hosts[src]['srcbytes'] += x[4]
+                botnet_hosts[src]['dstbytes'] += x[5]
+                botnet_hosts[src]['unique_ports'].add(flow[3])
+                botnet_hosts[src]['unique_dsts'].add(dst)
+
+        if dst.startswith(internal_hosts_prefix):
+            if dst not in botnet_hosts:
+                botnet_hosts[dst] = {}
+                botnet_hosts[dst]['count'] = 1
+                botnet_hosts[dst]['srcpkts'] = x[3]
+                botnet_hosts[dst]['dstpkts'] = x[2]
+                botnet_hosts[dst]['srcbytes'] = x[5]
+                botnet_hosts[dst]['dstbytes'] = x[4]
+                botnet_hosts[dst]['unique_ports'] = {flow[1]}
+                botnet_hosts[dst]['unique_dsts'] = {src}
+            else:
+                botnet_hosts[dst]['count'] += 1
+                botnet_hosts[dst]['srcpkts'] += x[3]
+                botnet_hosts[dst]['dstpkts'] += x[2]
+                botnet_hosts[dst]['srcbytes'] += x[5]
+                botnet_hosts[dst]['dstbytes'] += x[4]
+                botnet_hosts[dst]['unique_ports'].add(flow[1])
+                botnet_hosts[dst]['unique_dsts'].add(src)
+
+    ips = []
+    new_xs = []
+
+    for host in botnet_hosts:
+        ips.append(host)
+        curr = botnet_hosts[host]
+        new_xs.append(
+            [curr['count'], curr['srcpkts'], curr['dstpkts'], curr['srcbytes'], curr['dstbytes'],
+             len(curr['unique_ports']) / 65535, len(curr['unique_dsts'])])
+
+    scaled_xs = StandardScaler().fit_transform(new_xs)
+
+    # Tsne
+    print("Doing TSNE...")
+    # tsne = TSNE(n_components=2, verbose=1, perplexity=30, n_iter=1000, learning_rate=10) # DS 9
+    #tsne = TSNE(n_components=2, verbose=1, perplexity=5, n_iter=1000, learning_rate=3) # DS6
+    #tsne = TSNE(n_components=2, verbose=1, perplexity=5, n_iter=1000, learning_rate=10) # DS 10
+
+    tsne = TSNE(n_components=3, verbose=1, perplexity=30, n_iter=1000, learning_rate=10)  # DS 9
+    tsne_results = tsne.fit_transform(scaled_xs)
+
+    print("Doing clustering...")
+    # clusterer = hdbscan.RobustSingleLinkage(gamma=1)
+    # clusterer.fit_predict(scaled_xs)
+    #
+    #
+    # hierarchy = clusterer.cluster_hierarchy_._linkage
+    # hierarchy.plot()
+    # plt.show()
+    #
+    # cluster_labels = hierarchy.get_clusters(8.2, min_cluster_size=1)
+    # for i, j in zip(cluster_labels, ips):
+    #    print(i, j)
+    # clusterer = hdbscan.HDBSCAN(min_cluster_size=1, allow_single_cluster=True).fit(scaled_xs)
+
+    ac = AgglomerativeClustering(affinity="euclidean", linkage="ward")
+    #ac = KMeans(n_clusters=2)
+    ac.fit(scaled_xs)
+    labels = ac.labels_
+
+    #clusters = {}
+    cluster0 = []
+    cluster1 = []
+
+    for host, label, t in zip(ips, labels, tsne_results):
+        if label == 0:
+            cluster0.append((host, t))
+        elif label == 1:
+            cluster1.append((host, t))
+        else:
+            raise
+
+    # define 0 as the majority/normal cluster and 1 as the anomalous cluster
+    if len(cluster1) > len(cluster0):
+        cluster0, cluster1 = cluster1, cluster0
+
+    print("Processing clustering output...")
+
+    tp_x = []
+    tp_y = []
+    tp_z = []
+
+    fp_x = []
+    fp_y = []
+    fp_z = []
+
+    tn_x = []
+    tn_y = []
+    tn_z = []
+
+    fn_x = []
+    fn_y = []
+    fn_z = []
+
+    for host, t in cluster0:
+        if (window >= infection_range[0] and window <= infection_range[1]) and host in infected_IPs:
+            fn_x.append(t[0])
+            fn_y.append(t[1])
+            fn_z.append(t[2])
+        else:
+            tn_x.append(t[0])
+            tn_y.append(t[1])
+            tn_z.append(t[2])
+
+    for host, t in cluster1:
+        if (window >= infection_range[0] and window <= infection_range[1]) and host in infected_IPs:
+            tp_x.append(t[0])
+            tp_y.append(t[1])
+            tp_z.append(t[2])
+        else:
+            fp_x.append(t[0])
+            fp_y.append(t[1])
+            fp_z.append(t[2])
+
+    # normal in blue, botnet in red
+    #fig, ax = plt.subplots()
+
+    fig = pyplot.figure()
+    ax = Axes3D(fig)
+    ax.xaxis.set_ticklabels([])
+    ax.yaxis.set_ticklabels([])
+    ax.zaxis.set_ticklabels([])
+    ax.set_autoscalex_on(True)
+    ax.set_autoscaley_on(True)
+    ax.set_autoscalez_on(True)
+    # ax.set_xlim([-3, 3])
+    # ax.set_ylim([-3, 3])
+
+    ax.scatter(tn_x, tn_y, tn_z, color='blue', s=8, label='true negative IPs')
+    ax.scatter(fn_x, fn_y, fn_z, color='blue', marker='x', label='false negative IPs')
+    ax.scatter(fp_x, fp_y, fp_z, color='red', marker='x', label='false positive IPs')
+    ax.scatter(tp_x, tp_y, tp_z, color='red', s=8, label='true positive IPs')
+
+    fig.suptitle("CTU-13 Dataset " + str(dataset_no) + " t-SNE, window=" + str(window))
+    plt.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc=3,
+           ncol=4, mode="expand", borderaxespad=0., prop={'size':6})
+    #fig.savefig(savepath, bbox_inches='tight')
+    plt.show()
+    #plt.close(fig)
 
 
 '''
@@ -425,7 +612,7 @@ def evaluate_clustering_performance(clusterer, folder_name, model_filename, infe
     model = Model(model_filename, fp.ARGUS_FIELDS, internal_hosts_prefix)
 
 
-    for window in range(1, 125):
+    for window in range(1, infection_range[1]):
         filename = folder_name + str(window) + ".binetflow"
         print("Parsing file: " + filename)
         flows, xs = fp.parse_binetflow(filename)
@@ -488,9 +675,12 @@ def evaluate_clustering_performance(clusterer, folder_name, model_filename, infe
                 [curr['count'], curr['srcpkts'], curr['dstpkts'], curr['srcbytes'], curr['dstbytes'],
                  len(curr['unique_ports']) / 65535, len(curr['unique_dsts'])])
 
-        scaled_xs = StandardScaler().fit_transform(new_xs)
-        clusterer.fit(scaled_xs)
-        labels = clusterer.labels_
+        try:
+            scaled_xs = StandardScaler().fit_transform(new_xs)
+            clusterer.fit(scaled_xs)
+            labels = clusterer.labels_
+        except Exception as e:
+            continue
 
         # clusters = {}
         cluster0 = set()
@@ -527,15 +717,16 @@ def evaluate_clustering_performance(clusterer, folder_name, model_filename, infe
 def main():
     DIR_PATH = "/media/SURF2017/SURF2017/datasets/9/capture20110817truncated_300_150/"
     MODEL_FILE = "/media/SURF2017/SURF2017/models/ctu9_40_300.pkl"
-    # FOLDER_NAME = "ag_cosine_complete/"
-    #
-    # for i in range(1, 126):
-    #     binetflow_file = DIR_PATH + str(i) + ".binetflow"
-    #     save_path = DIR_PATH + FOLDER_NAME + str(i) + ".png"
-    #     visualize_clustering_tsne(binetflow_file, MODEL_FILE, save_path, 9, (56, 125))
+    FOLDER_NAME = "ag_ward_3D/"
 
-    clusterer = AgglomerativeClustering(linkage='complete')
-    evaluate_clustering_performance(clusterer, DIR_PATH, MODEL_FILE, constants.DATASET_9_INFECTED_HOSTS, (56, 125))
+    for i in range(86, 87):
+        binetflow_file = DIR_PATH + str(i) + ".binetflow"
+        save_path = DIR_PATH + FOLDER_NAME + str(i) + ".png"
+        visualize_clustering_tsne(binetflow_file, MODEL_FILE, save_path, 9, (54, 123))
+
+    #clusterer = AgglomerativeClustering(affinity='euclidean', linkage='ward')
+    #clusterer = KMeans(n_clusters=2)
+    #evaluate_clustering_performance(clusterer, DIR_PATH, MODEL_FILE, constants.DATASET_13_INFECTED_HOSTS, (2, 394))
 
     #pcap_file = raw_input("Enter the .pcap file: ")
     #labelled_file = raw_input("Enter the labelled file: ")

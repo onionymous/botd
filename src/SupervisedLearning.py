@@ -506,14 +506,14 @@ def main():
     # flows, test_x, test_y = fp.parse_ctu(flows_file, labelled, features_list, sample_rate=0)
 
     sess = fp.ArgusBatchSession(labelled, features_list, 300, 150)
-    # clf = RandomForestClassifier(n_estimators=100)
-    clf = GradientBoostingClassifier(n_estimators=100)
+    clf = RandomForestClassifier(n_estimators=100)
+    #clf = GradientBoostingClassifier(n_estimators=100)
 
     # sess.train_model_on_file(clf, 100000, 10000, "../models/ctu9_40_full.pkl", flows_file)
-    sess.train_model_on_folder(clf, 100000, 10000, "../models/ctu9_40_300_gb.pkl", "/media/SURF2017/CTU-13-Dataset/9/capture20110817pcaptruncated_300_150", 56, 125)
+    sess.train_model_on_folder(clf, 10000, 10000, "../models/ctu9_40_300_balanced.pkl", "/media/SURF2017/SURF2017/datasets/9/capture20110817truncated_300_150", 56, 125)
 
     # clf = joblib.load("/media/SURF2017/SURF2017/models/ctu9_40_full.pkl")
-    sess.test_model_on_folder(clf, "/media/SURF2017/CTU-13-Dataset/9/capture20110817pcaptruncated_300_150", 56)
+    sess.test_model_on_folder(clf, "/media/SURF2017/SURF2017/datasets/9/capture20110817truncated_300_150", 56)
 
     # test_model("../models/ISCX_rf_40.pkl", flows, test_x, test_y)
     #train_iscx()

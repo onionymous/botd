@@ -427,9 +427,9 @@ def agglomerative_clustering2(models_folder, binetflow_folder, outfile):
         models.append(clf)
 
     os.chdir(binetflow_folder)
-    for i in range(1, 393):
-        filename = str(i) + ".binetflow"
-        f.write("current window: " + filename + "\n")
+    for window in range(1, 393):
+        filename = str(window) + ".binetflow"
+        # f.write("current window: " + filename + "\n")
         print("current window: " + filename)
         flows, xs = fp.parse_binetflow(filename)
 
@@ -518,10 +518,17 @@ def agglomerative_clustering2(models_folder, binetflow_folder, outfile):
                 clusters[label].add(host)
                 host_vectors[label].append(x)
 
+        var_benign = np.var(host_vectors[0])
+        var_bots = np.var(host_vectors[1])
+        if var_benign > var_bots:
+            clusters = {0: clusters[1], 1: clusters[0]}
+            var_benign, var_bots = var_bots, var_benign
 
-        for i in sorted(clusters.keys()):
-            f.write("cluster: " + str(i) + " num IPs: " + str(len(clusters[i])) + " var: " + str(np.var(host_vectors[i])) + "\n")
-            f.write(", ".join(clusters[i]) + "\n")
+        f.write(",".join([str(v) for v in [window, var_benign, len(clusters[0]), var_bots, len(clusters[1])] ]))
+
+        # for i in sorted(clusters.keys()):
+        #     f.write("cluster: " + str(i) + " num IPs: " + str(len(clusters[i])) + " var: " + str(np.var(host_vectors[i])) + "\n")
+        #     f.write(", ".join(clusters[i]) + "\n")
 
         f.write("\n")
 
@@ -570,13 +577,14 @@ def evaluate_clustering(cluster_output, actual_infected_ips):
 
 
 def main():
-    evaluate_clustering("/media/SURF2017/CTU-13-Dataset/11/clustering_output.txt", constants.DATASET_11_INFECTED_HOSTS)
-    # OUTFILE = "/media/SURF2017/CTU-13-Dataset/9/clustering_output_GB.txt"
+    #
+# evaluate_clustering("/media/SURF2017/CTU-13-Dataset/11/clustering_output.txt", constants.DATASET_11_INFECTED_HOSTS)
+    OUTFILE = "/media/SURF2017/clustering_output_12_AC.txt"
     # MODEL = "/media/SURF2017/SURF2017/models/ctu9_40_300_gb.pkl"
-    # MODEL_FOLDER = "/media/SURF2017/SURF2017/models/"
+    MODEL_FOLDER = "/media/SURF2017/SURF2017/models/"
     #dbscan(MODEL, "/media/SURF2017/CTU-13-Dataset/9/capture20110817pcaptruncated_300_150/3.binetflow")
-    # agglomerative_clustering(MODEL, "/media/SURF2017/CTU-13-Dataset/9/capture20110817pcaptruncated_300_150", OUTFILE)
-    # agglomerative_clustering2(MODEL_FOLDER, "/media/SURF2017/CTU-13-Dataset/5/capture201108152truncated_300_150", OUTFILE)
+    #agglomerative_clustering(MODEL, "/media/SURF2017/CTU-13-Dataset/9/capture20110817pcaptruncated_300_150", OUTFILE)
+    agglomerative_clustering2(MODEL_FOLDER, "/media/SURF2017/SURF2017/datasets/CTU-13-Dataset/12/capture20110819truncated_300_150", OUTFILE)
     # pcap_file = raw_input("Enter the .pcap file: ")
     # labelled_file = raw_input("Enter the labelled file: ")az
     # output_folder = generate_windowed_pcaps(pcap_file, 300, 150)
